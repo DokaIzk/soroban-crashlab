@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from 'vitest';
 import * as Sentry from '@sentry/nextjs';
-import { initSentryClient, sentryAdapter } from './sentry-client';
+import { initSentryClient, sentryAdapter, MOCK_DATA_SESSION_KEY } from './sentry-client';
 
 vi.mock('@sentry/nextjs', () => ({
   init: vi.fn(),
@@ -59,20 +59,80 @@ describe('Sentry Client Integration', () => {
     expect(Sentry.captureMessage).toHaveBeenCalledWith('test message', 'warning');
   });
 
-  it('should ignore blocked sessionStorage access in beforeSend', () => {
-    process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://mock-dsn@sentry.io/1';
+  describe('beforeSend with restricted storage', () => {
+    function runBeforeSend() {
+      process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://mock-dsn@sentry.io/1';
+      initSentryClient();
+      const sentryInit = vi.mocked(Sentry.init).mock.calls.at(-1)?.[0];
+      return () => sentryInit?.beforeSend?.({ tags: {} } as any, {} as any);
+    }
 
-    Object.defineProperty(window, 'sessionStorage', {
-      configurable: true,
-      get() {
-        throw new Error('Blocked storage');
-      },
+    afterEach(() => {
+      vi.unstubAllGlobals();
     });
 
-    initSentryClient();
-    const sentryInit = vi.mocked(Sentry.init).mock.calls.at(-1)?.[0];
+    it('does not throw when the sessionStorage getter throws', () => {
+      const win = {};
+      Object.defineProperty(win, 'sessionStorage', {
+        configurable: true,
+        get() {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        },
+      });
+      vi.stubGlobal('window', win);
+      const beforeSend = runBeforeSend();
+      expect(beforeSend).not.toThrow();
+      expect(beforeSend()).toMatchObject({ tags: { environment: 'production' } });
+    });
 
-    expect(() => sentryInit?.beforeSend?.({ tags: {} } as any)).not.toThrow();
-    expect(sentryInit?.beforeSend?.({ tags: {} } as any)).toMatchObject({ tags: { environment: 'production' } });
+    it('does not throw when sessionStorage.getItem throws', () => {
+      vi.stubGlobal('window', {
+        sessionStorage: {
+          getItem: () => {
+            throw new Error('Blocked storage');
+          },
+        },
+      });
+      const beforeSend = runBeforeSend();
+      expect(beforeSend).not.toThrow();
+      expect(beforeSend()).toMatchObject({ tags: { environment: 'production' } });
+    });
+
+    it('scrubs PII deny-by-default before tagging', () => {
+      const sentryInit = (() => {
+        process.env.NEXT_PUBLIC_SENTRY_DSN = 'https://mock-dsn@sentry.io/1';
+        initSentryClient();
+        return vi.mocked(Sentry.init).mock.calls.at(-1)?.[0];
+      })();
+      const event = {
+        event_id: 'e1',
+        message: 'mail alice@example.com',
+        user: { email: 'alice@example.com' },
+        request: { method: 'GET', url: 'https://app/?q=secret', headers: { cookie: 'c' } },
+        breadcrumbs: [{ message: 'x' }],
+        tags: { userEmail: 'alice@example.com' },
+      };
+      expect(sentryInit?.beforeSend?.(event as any, {} as any)).toEqual({
+        event_id: 'e1',
+        message: 'mail [email]',
+        request: { method: 'GET' },
+        tags: { environment: 'production' },
+      });
+    });
+
+    it('does not initialise Sentry for an invalid DSN', () => {
+      process.env.NEXT_PUBLIC_SENTRY_DSN = 'not-a-dsn';
+      initSentryClient();
+      expect(Sentry.init).not.toHaveBeenCalled();
+    });
+
+    it('tags mock-data sessions when the flag is readable', () => {
+      vi.stubGlobal('window', {
+        sessionStorage: {
+          getItem: (key: string) => (key === MOCK_DATA_SESSION_KEY ? 'true' : null),
+        },
+      });
+      expect(runBeforeSend()()).toMatchObject({ tags: { environment: 'mock-data' } });
+    });
   });
 });

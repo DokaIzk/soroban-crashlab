@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateTick } from './tick-evaluator';
 import type { Schedule, ScheduledRun } from './schedule-store';
+import { parseSchedulingWindows } from '../capacity/windows';
 
 function schedule(overrides: Partial<Schedule> = {}): Schedule {
   return {
@@ -42,8 +43,21 @@ describe('evaluateTick — due schedules', () => {
       tickCount: 1,
       caughtUp: false,
       tags: ['scheduled'],
+      idempotencyKey: `schedule:sched-1:${Date.parse('2026-03-01T08:30:00.000Z')}`,
     });
     expect(out.schedules[0].lastRunAt).toBe('2026-03-01T08:30:00.000Z');
+  });
+
+  it('derives the same idempotency key for the same slot on any evaluation (#1634)', () => {
+    // A cron retry re-evaluating from the same anchor at a later wall-clock
+    // time still targets the 08:30 slot, so it must produce the same key.
+    const input = { schedules: [schedule({ createdAt: '2026-03-01T08:05:00.000Z' })], history: [] };
+    const first = evaluateTick({ ...input, now: new Date('2026-03-01T08:35:00.000Z') });
+    const retry = evaluateTick({ ...input, now: new Date('2026-03-01T08:44:00.000Z') });
+    expect(retry.created[0].idempotencyKey).toBe(first.created[0].idempotencyKey);
+
+    const nextSlot = evaluateTick({ ...input, now: new Date('2026-03-01T09:05:00.000Z') });
+    expect(nextSlot.created[0].idempotencyKey).not.toBe(first.created[0].idempotencyKey);
   });
 
   it('tags every scheduled run with "scheduled"', () => {
@@ -104,6 +118,8 @@ describe('evaluateTick — idempotency (double tick)', () => {
       tickCount: 1,
       caughtUp: false,
       tags: ['scheduled'],
+      idempotencyKey: 'schedule:sched-1:1772353800000',
+      campaignClass: 'nightly',
     };
     const out = evaluateTick({
       schedules: [schedule({ createdAt: '2026-03-01T08:05:00.000Z', lastRunAt: null })],
@@ -184,5 +200,48 @@ describe('evaluateTick — multiple schedules', () => {
       now: new Date('2026-03-01T09:05:00.000Z'),
     });
     expect(out.created.map((r) => r.scheduleId).sort()).toEqual(['a']);
+  });
+});
+
+describe('evaluateTick — scheduling windows and priority (#1904)', () => {
+  const windows = parseSchedulingWindows('deep=00:00-06:00').windows;
+
+  it('defers a due deep schedule while its window is closed, then catches up once', () => {
+    const deep = schedule({ id: 'deep', cron: '0 * * * *', campaignClass: 'deep' });
+    const closed = evaluateTick({ schedules: [deep], history: [], now: new Date('2026-03-01T12:05:00.000Z'), windows });
+    expect(closed.created).toEqual([]);
+    expect(closed.deferred).toEqual([{ scheduleId: 'deep', campaignClass: 'deep', opensInSeconds: 11 * 3600 + 55 * 60 }]);
+    expect(closed.schedules[0].lastRunAt).toBeNull(); // anchor untouched
+
+    const open = evaluateTick({ schedules: closed.schedules, history: closed.history, now: new Date('2026-03-02T00:05:00.000Z'), windows });
+    expect(open.deferred).toEqual([]);
+    expect(open.created).toHaveLength(1);
+    expect(open.created[0]).toMatchObject({ scheduleId: 'deep', campaignClass: 'deep', caughtUp: true });
+  });
+
+  it('fires every class when no windows are configured; unclassed schedules are nightly', () => {
+    const out = evaluateTick({
+      schedules: [schedule({ id: 'plain' }), schedule({ id: 'deep', campaignClass: 'deep' })],
+      history: [],
+      now: new Date('2026-03-01T12:05:00.000Z'),
+    });
+    expect(out.deferred).toEqual([]);
+    expect(out.created.map((r) => [r.scheduleId, r.campaignClass])).toEqual([
+      ['plain', 'nightly'],
+      ['deep', 'deep'],
+    ]);
+  });
+
+  it('orders created runs by class priority', () => {
+    const out = evaluateTick({
+      schedules: [
+        schedule({ id: 'd', campaignClass: 'deep' }),
+        schedule({ id: 'n', campaignClass: 'nightly' }),
+        schedule({ id: 'i', campaignClass: 'interactive' }),
+      ],
+      history: [],
+      now: new Date('2026-03-01T09:05:00.000Z'),
+    });
+    expect(out.created.map((r) => r.scheduleId)).toEqual(['i', 'n', 'd']);
   });
 });

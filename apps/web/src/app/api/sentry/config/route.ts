@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
 import { checkRequestSize } from '@/lib/request-size-limits';
+import { withSizeLimitAndLogging } from '@/lib/route-handler';
 import {
   validateSentryConfig,
   type SentryConfig,
-} from '@/app/integrate-sentry-integration-for-crash-reporting-utils';
+} from '../../../../features/integrations/integrate-sentry-integration-for-crash-reporting-utils';
 import { errorResponse, successResponse } from '@/lib/api-response-utils';
 
 // In-memory store (persists for the lifetime of the process)
@@ -24,7 +25,7 @@ export async function GET() {
  * POST /api/sentry/config
  * Validates and persists a Sentry configuration. Body: SentryConfig JSON.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const sizeError = checkRequestSize(request);
   if (sizeError) {
     return sizeError;
@@ -50,3 +51,5 @@ export async function POST(request: NextRequest) {
   config = candidate;
   return successResponse(config);
 }
+
+export const POST = withSizeLimitAndLogging('POST /api/sentry/config', postHandler);

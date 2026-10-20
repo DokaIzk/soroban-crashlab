@@ -8,6 +8,7 @@ interface StructuredLogEntry {
   requestId?: string;
   service?: string;
   environment?: string;
+  module?: string;
   [key: string]: unknown;
 }
 
@@ -20,27 +21,48 @@ interface CloudWatchConfig {
 
 type LogWriter = (entry: StructuredLogEntry) => void | Promise<void>;
 
+import { redactText, redactValue } from './redaction';
+
 export class StructuredLogger {
   private writer: LogWriter;
   private cloudWatchConfig: CloudWatchConfig;
   private service: string;
   private environment: string;
+  private defaultModule?: string;
 
-  constructor(writer: LogWriter, cloudWatchConfig?: CloudWatchConfig) {
+  constructor(writer: LogWriter, cloudWatchConfig?: CloudWatchConfig, defaultModule?: string) {
     this.writer = writer;
     this.cloudWatchConfig = cloudWatchConfig || { enabled: false };
     this.service = process.env.SERVICE_NAME || 'soroban-crashlab';
     this.environment = process.env.NODE_ENV || 'development';
+    this.defaultModule = defaultModule;
+  }
+
+  public withModule(module: string): StructuredLogger {
+    return new StructuredLogger(this.writer, this.cloudWatchConfig, module);
   }
 
   private async log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): Promise<void> {
+    let requestId: string | undefined = undefined;
+    try {
+      // Lazy dynamic import so this module stays importable from client code;
+      // headers() is a server-only API and throws outside a request context.
+      const { headers } = await import('next/headers');
+      const h = await headers();
+      requestId = h.get('x-request-id') || undefined;
+    } catch {
+      // not in a request context
+    }
+
     const entry: StructuredLogEntry = {
+      ...redactValue(fields) as Record<string, unknown>,
       level,
       timestamp: new Date().toISOString(),
-      message,
+      message: redactText(message),
       service: this.service,
       environment: this.environment,
-      ...fields,
+      requestId,
+      module: this.defaultModule,
     };
 
     try {

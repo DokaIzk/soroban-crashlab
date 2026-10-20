@@ -9,7 +9,7 @@
  * live issue data fetched from the /api/runs/[id]/issues endpoint.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FuzzingRun, RunIssueLink } from "../types";
 import { fetchRuns as fetchRunsFromApi } from "../../lib/api-client";
 import {
@@ -28,7 +28,7 @@ import {
   getRovingTabIndex,
   type KeyboardBoardState,
 } from "./triage-board-keyboard";
-import BulkActionsForRuns from "../add-bulk-actions-for-runs";
+import BulkActionsForRuns from "../../features/runs/add-bulk-actions-for-runs";
 import { getSelectedRuns } from "../runs-bulk-actions-utils";
 import { useTriageSelection } from "./use-triage-selection";
 import {
@@ -37,6 +37,8 @@ import {
 } from "./triage-swimlane-layout";
 import { triageSwimlaneStore } from "../../lib/storage-registry";
 import { toUserMessage } from "../../lib/api-error-mapper";
+import { WidgetErrorBoundary } from "../../components/WidgetErrorBoundary";
+import { useToast } from "../../components/Toast";
 
 // ---------------------------------------------------------------------------
 // Data fetching
@@ -224,7 +226,6 @@ function RunCard({
         borderColor: isLifted ? undefined : 'var(--border-color)',
       }}
       aria-label={`Run ${run.id}, area ${run.area}, severity ${run.severity}${isLifted ? ', lifted' : ''}`}
-      aria-selected={isLifted}
     >
       <div className="flex items-center justify-between mb-2">
         <span className="font-mono text-xs font-bold" style={{ color: '#0A66C2' }}>
@@ -337,6 +338,7 @@ export default function TriageBoardPage() {
   const [activeFilter, setActiveFilter] = useState<TriageFilter>("all");
   const [swimlane, setSwimlane] = useState(DEFAULT_SWIMLANE_CONFIG);
   const filterButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const { notifyError } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -395,7 +397,7 @@ export default function TriageBoardPage() {
   const [kbState, setKbState] = useState<KeyboardBoardState>(createInitialState(null));
   const allVisibleRuns = visibleColumns.flatMap((c) => getColumnRuns(runs, c));
   const firstBoardId = allVisibleRuns[0]?.id ?? null;
-  const orderedIds = useMemo(() => allVisibleRuns.map((r) => r.id), [runs, activeFilter]);
+  const orderedIds = allVisibleRuns.map((r) => r.id);
   const selection = useTriageSelection(orderedIds);
   const selectedRuns = getSelectedRuns(runs, selection.selectedRunIds);
 
@@ -585,8 +587,12 @@ export default function TriageBoardPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6" role="region" aria-label="Triage board - one tab stop, arrows navigate, Space lifts/drops, Escape cancels">
             {visibleColumns.map((col) => (
-            <TriageColumn
+            <WidgetErrorBoundary
               key={col.id}
+              title={`${col.title} column`}
+              onError={notifyError}
+            >
+            <TriageColumn
               col={col}
               runs={getColumnRuns(runs, col)}
               kbState={kbStateForBoard}
@@ -594,6 +600,7 @@ export default function TriageBoardPage() {
               onKeyNav={handleKeyNav}
               firstBoardId={firstBoardId}
             />
+            </WidgetErrorBoundary>
             ))}
           </div>
         </>

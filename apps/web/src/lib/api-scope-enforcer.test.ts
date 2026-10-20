@@ -3,8 +3,8 @@ import {
   getRequiredScopesForRequest,
   hasSufficientScope,
   checkScopePermission,
-  type ApiTokenScope,
 } from './api-scope-enforcer';
+import type { ApiTokenScope } from './storage/api-token-store';
 
 describe('API Scope Enforcer', () => {
   it('should determine required scopes for webhook operations', () => {

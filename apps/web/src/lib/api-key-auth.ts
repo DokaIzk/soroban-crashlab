@@ -11,6 +11,15 @@ export function getConfiguredApiKey(): string | undefined {
 }
 
 /**
+ * Checks if unauthenticated webhooks are explicitly allowed via escape hatch.
+ * This should ONLY be used for local development.
+ */
+function isUnauthenticatedWebhooksAllowed(): boolean {
+  const allow = process.env.CRASHLAB_ALLOW_UNAUTHENTICATED_WEBHOOKS;
+  return allow === '1' || allow === 'true';
+}
+
+/**
  * Extracts a Bearer token from an `Authorization: Bearer <token>` header.
  * Returns undefined when the header is absent or malformed.
  */
@@ -50,69 +59,32 @@ export function timingSafeStringEqual(a: string, b: string): boolean {
  * Validates the `Authorization: Bearer <key>` header on the request against
  * the configured `CRASHLAB_WEBHOOK_API_KEY` environment variable.
  *
- * - When no API key is configured in the environment the request is allowed
- *   through so existing deployments without the env var are unaffected.
+ * - When no API key is configured in the environment:
+ *   - Mutating requests (POST, PUT, PATCH, DELETE) are rejected with 503 unless
+ *     `CRASHLAB_ALLOW_UNAUTHENTICATED_WEBHOOKS=1` is set (local dev only).
+ *   - Non-mutating requests (GET) pass through for backward compatibility.
  * - When an API key IS configured the caller must supply a matching Bearer
  *   token; mismatches or absent headers are rejected with 401.
  *
- * Returns undefined when authentication passes (or is unconfigured), or a
- * NextResponse with status 401 when it fails.
+ * Returns undefined when authentication passes, or a NextResponse with status
+ * 401 (invalid/missing token) or 503 (auth not configured) when it fails.
  */
-/**
- * Reads the configured metrics scrape token from the environment.
- * The token guards the Prometheus metrics/health endpoints so they can only
- * be scraped by an authorized breaker, not by anyone who can reach the host.
- * Returns undefined when the env var is not set or is empty.
- */
-export function getMetricsScrapeToken(): string | undefined {
-  const token = process.env.CRASHLAB_METRICS_SCRAPE_TOKEN;
-  return token && token.trim().length > 0 ? token.trim() : undefined;
-}
-
-/**
- * Validates the `Authorization: Bearer <token>` header on the request against
- * the configured `CRASHLAB_METRICS_SCRAPE_TOKEN` environment variable.
- *
- * - When no scrape token is configured the request is allowed through so
- *   existing deployments without the env var are unaffected.
- * - When a scrape token IS configured the caller must supply a matching
- *   Bearer token; mismatches or absent headers are rejected with 401.
- *
- * Returns undefined when authentication passes (or is unconfigured), or a
- * NextResponse with status 401 when it fails.
- */
-export function validateMetricsScrapeAuth(request: NextRequest): NextResponse | undefined {
-  const configuredToken = getMetricsScrapeToken();
-
-  // No token configured — authentication is not enforced.
-  if (configuredToken === undefined) {
-    return undefined;
-  }
-
-  const token = extractBearerToken(request);
-  if (token === undefined) {
-    return NextResponse.json(
-      { error: 'Authentication required. Provide a valid Authorization: Bearer <token> header.' },
-      { status: 401 },
-    );
-  }
-
-  if (!timingSafeStringEqual(token, configuredToken)) {
-    return NextResponse.json(
-      { error: 'Invalid scrape token.' },
-      { status: 401 },
-    );
-  }
-
-  // Authentication passed.
-  return undefined;
-}
-
 export function validateWebhookApiKey(request: NextRequest): NextResponse | undefined {
   const configuredKey = getConfiguredApiKey();
 
-  // No key configured — authentication is not enforced.
+  // No key configured — authentication is enforced for mutating requests by default (fail-closed).
   if (configuredKey === undefined) {
+    const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method.toUpperCase());
+    if (isMutating && !isUnauthenticatedWebhooksAllowed()) {
+      return NextResponse.json(
+        {
+          error:
+            'Webhook authentication is not configured. Set CRASHLAB_WEBHOOK_API_KEY to enable mutating webhook endpoints, or set CRASHLAB_ALLOW_UNAUTHENTICATED_WEBHOOKS=1 for local development only.',
+          code: 'WEBHOOK_AUTH_NOT_CONFIGURED',
+        },
+        { status: 503 },
+      );
+    }
     return undefined;
   }
 
@@ -127,6 +99,77 @@ export function validateWebhookApiKey(request: NextRequest): NextResponse | unde
   if (!timingSafeStringEqual(token, configuredKey)) {
     return NextResponse.json(
       { error: 'Invalid API key.' },
+      { status: 401 },
+    );
+  }
+
+  // Authentication passed.
+  return undefined;
+}
+
+/**
+ * Reads the configured metrics scrape token from the environment.
+ * The token guards the Prometheus metrics/health endpoints so they can only
+ * be scraped by an authorized breaker, not by anyone who can reach the host.
+ * Returns undefined when the env var is not set or is empty.
+ */
+export function getMetricsScrapeToken(): string | undefined {
+  const token = process.env.CRASHLAB_METRICS_SCRAPE_TOKEN;
+  return token && token.trim().length > 0 ? token.trim() : undefined;
+}
+
+/**
+ * Checks if unauthenticated metrics scraping is explicitly allowed via escape
+ * hatch. This should ONLY be used for local development.
+ */
+function isUnauthenticatedMetricsAllowed(): boolean {
+  const allow = process.env.CRASHLAB_ALLOW_UNAUTHENTICATED_METRICS;
+  return allow === '1' || allow === 'true';
+}
+
+/**
+ * Validates the `Authorization: Bearer <token>` header on the request against
+ * the configured `CRASHLAB_METRICS_SCRAPE_TOKEN` environment variable.
+ *
+ * - When no scrape token is configured the request is rejected with 503
+ *   (fail-closed) unless `CRASHLAB_ALLOW_UNAUTHENTICATED_METRICS=1` is set
+ *   (local dev only).
+ * - When a scrape token IS configured the caller must supply a matching
+ *   Bearer token; mismatches or absent headers are rejected with 401.
+ *
+ * Returns undefined when authentication passes, or a NextResponse with status
+ * 401 (invalid/missing token) or 503 (auth not configured) when it fails.
+ */
+export function validateMetricsScrapeAuth(request: NextRequest): NextResponse | undefined {
+  const configuredToken = getMetricsScrapeToken();
+
+  // No token configured — authenticated scraping is enforced by default
+  // (fail-closed) so an unconfigured deployment does not leak metrics.
+  if (configuredToken === undefined) {
+    if (!isUnauthenticatedMetricsAllowed()) {
+      return NextResponse.json(
+        {
+          error:
+            'Metrics authentication is not configured. Set CRASHLAB_METRICS_SCRAPE_TOKEN to enable scraping, or set CRASHLAB_ALLOW_UNAUTHENTICATED_METRICS=1 for local development only.',
+          code: 'METRICS_AUTH_NOT_CONFIGURED',
+        },
+        { status: 503 },
+      );
+    }
+    return undefined;
+  }
+
+  const token = extractBearerToken(request);
+  if (token === undefined) {
+    return NextResponse.json(
+      { error: 'Authentication required. Provide a valid Authorization: Bearer <token> header.' },
+      { status: 401 },
+    );
+  }
+
+  if (!timingSafeStringEqual(token, configuredToken)) {
+    return NextResponse.json(
+      { error: 'Invalid scrape token.' },
       { status: 401 },
     );
   }
@@ -207,4 +250,3 @@ export function validateScopedApiToken(
 
   return undefined;
 }
-

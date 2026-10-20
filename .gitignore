@@ -9,6 +9,14 @@ test_snapshots/
 node_modules/
 apps/web/node_modules/
 apps/web/.next/
+*.tsbuildinfo
+test-results/
+playwright-report/
+
+# Python
+__pycache__/
+*.pyc
+.mypy_cache/
 
 # Env and logs
 .env
@@ -29,3 +37,9 @@ skills-lock.json
 IMPLEMENTATION_SUMMARY*.md
 tmp_*
 *_output.txt
+
+# flake-watch outputs
+flake-report.json
+flake-report.md
+flake-quarantine.proposed.json
+flake-attempts/

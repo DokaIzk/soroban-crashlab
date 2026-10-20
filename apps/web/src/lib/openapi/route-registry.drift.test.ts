@@ -31,6 +31,15 @@ const KNOWN_ROUTES = [
   'POST /api/artifacts/validate',
   'GET /api/campaigns',
   'POST /api/campaigns',
+  'GET /api/capacity',
+  'POST /api/capacity/usage',
+  'GET /api/integrations/ci/results',
+  'POST /api/integrations/ci/results',
+  'POST /api/webhooks/retry',
+  'POST /api/webhooks/recovery',
+  'POST /api/schedules/tick',
+  'POST /api/uploadthing',
+  'GET /api/openapi',
 ];
 
 describe('openapi route registry drift', () => {

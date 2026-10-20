@@ -37,6 +37,10 @@ fn write_mismatched_bundle(dir: &PathBuf, name: &str, seed: CaseSeed) -> PathBuf
         environment: None,
         failure_payload: vec![],
         rpc_envelope: None,
+        provenance: None,
+        original_seed: None,
+        shrink_lineage: None,
+    engine_version: crashlab_core::engine_version::ENGINE_VERSION.to_string(),
     };
     let path = dir.join(name);
     let bytes = serde_json::to_vec(&doc).expect("serialize doc");

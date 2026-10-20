@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkRbacPermission } from '../../../../lib/rbac';
+import { checkRbacPermission, describePrincipal } from '../../../../lib/rbac';
 import { checkRequestSize } from '../../../../lib/request-size-limits';
+import { withSizeLimitAndLogging } from '../../../../lib/route-handler';
 import { assignRole, revokeRole, listRoleAssignments } from '../../../../lib/storage/role-store';
 
 export async function GET(request: NextRequest) {
-  const rbacError = checkRbacPermission(request);
+  const rbacError = await checkRbacPermission(request);
   if (rbacError) return rbacError;
 
-  const assignments = listRoleAssignments();
+  const assignments = await listRoleAssignments();
 
   return NextResponse.json({
     assignments,
   });
 }
 
-export async function POST(request: NextRequest) {
-  const rbacError = checkRbacPermission(request);
+async function postHandler(request: NextRequest) {
+  const rbacError = await checkRbacPermission(request);
   if (rbacError) return rbacError;
 
   const sizeError = checkRequestSize(request);
@@ -35,10 +36,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const assignment = assignRole({
+    // Roles are stored against a verified identity and the change is recorded
+    // against the principal that made it, so the trail is attributable.
+    const { principal } = await describePrincipal(request);
+
+    const assignment = await assignRole({
       identityType: body.identityType,
       identityValue: body.identityValue,
       role: body.role,
+      performedBy: principal.subject,
     });
 
     return NextResponse.json({ assignment }, { status: 201 });
@@ -51,8 +57,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
-  const rbacError = checkRbacPermission(request);
+async function deleteHandler(request: NextRequest) {
+  const rbacError = await checkRbacPermission(request);
   if (rbacError) return rbacError;
 
   const sizeError = checkRequestSize(request);
@@ -71,9 +77,12 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const success = revokeRole({
+    const { principal } = await describePrincipal(request);
+
+    const success = await revokeRole({
       identityType: body.identityType,
       identityValue: body.identityValue,
+      performedBy: principal.subject,
     });
 
     if (!success) {
@@ -92,3 +101,6 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+
+export const POST = withSizeLimitAndLogging('POST /api/settings/roles', postHandler);
+export const DELETE = withSizeLimitAndLogging('DELETE /api/settings/roles', deleteHandler);

@@ -11,20 +11,28 @@
 
 import { successResponse, errorResponse } from '@/lib/api-response-utils';
 import { checkRequestSize } from '@/lib/request-size-limits';
-import { buildDedupKey } from '../../../../integrate-pagerduty-alert-integration-utils';
-import type { TriggerAlertPayload } from '../../../../../lib/integrations/pagerduty-adapter';
+import { withSizeLimitAndLogging } from '@/lib/route-handler';
+import { buildDedupKey } from '../../../../../features/integrations/integrate-pagerduty-alert-integration-utils';
 import { PAGERDUTY_FETCH_TIMEOUT_MS } from '../../../../../lib/timeouts';
+import { PagerDutyTriggerSchema } from '@/lib/schemas/integrations/pagerduty';
 
 const PD_EVENTS_API_URL = 'https://events.pagerduty.com/v2/enqueue';
 
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   const sizeError = checkRequestSize(request);
   if (sizeError) {
     return sizeError;
   }
 
   try {
-    const body = (await request.json()) as TriggerAlertPayload & { integrationKey?: string };
+    const unparsedBody = await request.json();
+    const validation = PagerDutyTriggerSchema.safeParse(unparsedBody);
+    
+    if (!validation.success) {
+      return errorResponse(validation.error.errors[0].message, 400);
+    }
+    
+    const body = validation.data;
 
     const integrationKey = (
       body.integrationKey ?? process.env.PAGERDUTY_INTEGRATION_KEY ?? ''
@@ -33,13 +41,6 @@ export async function POST(request: Request) {
     if (!integrationKey) {
       return errorResponse(
         'PagerDuty integration key is not configured',
-        400,
-      );
-    }
-
-    if (!body.runId || !body.signature || !body.summary) {
-      return errorResponse(
-        'runId, signature, and summary are required',
         400,
       );
     }
@@ -97,3 +98,5 @@ export async function POST(request: Request) {
     return errorResponse('Failed to parse request body', 400);
   }
 }
+
+export const POST = withSizeLimitAndLogging('POST /api/integrations/pagerduty/trigger', postHandler);

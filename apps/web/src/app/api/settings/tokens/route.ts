@@ -1,10 +1,13 @@
 import { NextRequest } from 'next/server';
 import {
   createApiToken,
+  getApiTokenSecretHash,
   listApiTokens,
   ApiTokenScope,
 } from '../../../../lib/storage/api-token-store';
+import { registerTokenPrincipal } from '../../../../lib/storage/token-principal-store';
 import { checkRequestSize } from '../../../../lib/request-size-limits';
+import { withSizeLimitAndLogging } from '../../../../lib/route-handler';
 import { errorResponse, createdResponse, successResponse } from '../../../../lib/api-response-utils';
 
 export async function GET() {
@@ -12,7 +15,7 @@ export async function GET() {
   return successResponse({ tokens });
 }
 
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const sizeError = checkRequestSize(request);
   if (sizeError) {
     return sizeError;
@@ -33,6 +36,7 @@ export async function POST(request: NextRequest) {
       'runs:write',
       'settings:read',
       'settings:write',
+      'ci:write',
       '*',
     ];
 
@@ -59,6 +63,14 @@ export async function POST(request: NextRequest) {
       expiresAt: validatedExpiry,
     });
 
+    // Index the token as an RBAC principal so requests authenticating with it
+    // resolve to this token's id and therefore to whatever role is assigned to
+    // `api-key:<id>`.
+    const sha256Hash = getApiTokenSecretHash(token.id);
+    if (sha256Hash) {
+      await registerTokenPrincipal({ tokenId: token.id, sha256Hash });
+    }
+
     return createdResponse({
       message: 'Token created successfully. Store this secret safely as it will not be shown again.',
       secret,
@@ -68,3 +80,5 @@ export async function POST(request: NextRequest) {
     return errorResponse('Failed to process token creation request.', 400);
   }
 }
+
+export const POST = withSizeLimitAndLogging('POST /api/settings/tokens', postHandler);

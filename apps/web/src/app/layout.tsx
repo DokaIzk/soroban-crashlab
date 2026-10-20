@@ -1,20 +1,37 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
+import { NONCE_HEADER } from "../lib/csp";
 import { fontVariables } from "./fonts";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { AccessibilityProvider } from "../components/AccessibilityProvider";
 import { LocaleProvider } from "../i18n/context";
 import { ToastProvider } from "../components/Toast";
 import NavBar from "../components/NavBar";
-import AddKeyboardShortcutCheatsheetModal from "./add-keyboard-shortcut-cheatsheet-modal";
+import AddKeyboardShortcutCheatsheetModal from "../features/misc/add-keyboard-shortcut-cheatsheet-modal";
 import OnboardingWizardHost from "./OnboardingWizardHost";
 import CommandPalette from "../components/CommandPalette";
 import PageTransition from "../components/PageTransition";
 import { GlobalScrollEffects } from "../components/scroll-effects/GlobalScrollEffects";
-import { NextSSRPlugin } from "@uploadthing/react/next-ssr-plugin";
+import { UploadthingSsrConfigScript } from "../components/UploadthingSsrConfigScript";
 import { extractRouterConfig } from "uploadthing/server";
 import { crashlabFileRouter } from "./api/uploadthing/core";
 import { SentryClientBootstrap } from "../components/SentryClientBootstrap";
+
+/**
+ * Nonce-based CSP (issue #1545, see docs/CSP.md). The proxy mints a
+ * per-request nonce and Next.js stamps it onto the scripts it emits — but only
+ * for a response rendered per request. A prerendered page is built at compile
+ * time with no request headers in scope, so its inline scripts would carry
+ * `"nonce":"$undefined"` and the strict `script-src` would block hydration
+ * entirely. Forcing dynamic rendering is what makes the nonce meaningful.
+ *
+ * This opts every page in the app out of static prerendering, which costs TTFB
+ * and CDN-cacheability in exchange for a policy that actually blocks injected
+ * script. Revisit if the app moves behind full-route caching.
+ */
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: "Soroban CrashLab | Smart Contract Fuzzing Platform",
   description:
@@ -38,20 +55,37 @@ export const metadata: Metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 5,
-  userScalable: true,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The per-request CSP nonce minted by the proxy. Next stamps it onto the
+  // scripts it emits, but third-party components that inject their own
+  // <script> must be handed it explicitly or the browser blocks them.
+  // Reading headers() also keeps this layout on the dynamic render path the
+  // nonce requires.
+  const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
+
   return (
     <html lang="en" className={fontVariables} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{
-          __html: `\n            try {\n              var t = localStorage.getItem('crashlab:theme');\n              var d = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);\n              document.documentElement.classList.toggle('dark', d);\n              var a = null;\n              try { a = JSON.parse(localStorage.getItem('crashlab:accessibility-prefs:v1') || 'null'); } catch(e) {}\n              var motion = a && a.motion;\n              var osReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;\n              if (motion === 'reduced' || (!motion || motion === 'system') && osReduced) document.documentElement.setAttribute('data-motion', 'reduced');\n              var scale = a && a.textScale;\n              var allowed = [100,112,125,150];\n              if (allowed.indexOf(scale) === -1) scale = 100;\n              document.documentElement.setAttribute('data-text-scale', String(scale));\n              document.documentElement.style.fontSize = ((16 * scale) / 100) + 'px';\n              if (a && a.contrast === 'high') document.documentElement.classList.add('high-contrast');\n            } catch(e) {}\n            document.documentElement.classList.add('theme-ready');\n          ` }} />
+        {/*
+          Pre-paint theme/accessibility bootstrap, served as a static file so it is
+          covered by `script-src 'self'` and needs no inline allowance
+          (issue #1545, see docs/CSP.md). Kept synchronous and in <head> so it runs
+          before first paint — `async`/`defer` would let the wrong theme flash.
+          src/app/theme-bootstrap.test.ts asserts this file stays in sync with
+          generateThemeBootstrapScript().
+        */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts -- this script
+            MUST block parsing: it applies the persisted theme before first
+            paint. Deferring or async-ing it would let the wrong theme render
+            and then swap, which is the flash-of-wrong-theme this exists to
+            prevent. See docs/CSP.md. */}
+        <script src="/theme-script.js" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="icon" href="/favicon/192x192/favicon.svg" type="image/svg+xml" sizes="192x192" />
         <link rel="apple-touch-icon" href="/favicon/180x180/favicon.svg" />
@@ -63,7 +97,10 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="antialiased min-h-screen">
-        <NextSSRPlugin routerConfig={extractRouterConfig(crashlabFileRouter)} />
+        <UploadthingSsrConfigScript
+          routerConfig={extractRouterConfig(crashlabFileRouter)}
+          nonce={nonce}
+        />
         <a href="#main-content" className="skip-link">Skip to main content</a>
         <LocaleProvider>
           <SentryClientBootstrap />

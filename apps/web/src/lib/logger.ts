@@ -1,4 +1,4 @@
-type LogLevel = 'info' | 'warn' | 'error';
+import { structuredLogger } from './structured-logger';
 
 interface LogFields {
   [key: string]: unknown;
@@ -10,30 +10,19 @@ function defaultWriter(line: string): void {
   process.stdout.write(line + '\n');
 }
 
-function serializeFields(fields: LogFields): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fields)) {
-    out[k] = v instanceof Error ? v.message : v;
-  }
-  return out;
-}
-
-export function createLogger(writer: Writer = defaultWriter) {
-  function log(level: LogLevel, msg: string, fields: LogFields = {}): void {
-    const entry = {
-      level,
-      time: new Date().toISOString(),
-      msg,
-      ...serializeFields(fields),
-    };
-    writer(JSON.stringify(entry));
-  }
-
+/**
+ * @deprecated Use structuredLogger from './structured-logger' instead.
+ * This is a shim to maintain backwards compatibility during migration.
+ */
+export function createLogger(_writer: Writer = defaultWriter) {
   return {
-    info(msg: string, fields?: LogFields): void { log('info', msg, fields ?? {}); },
-    warn(msg: string, fields?: LogFields): void { log('warn', msg, fields ?? {}); },
-    error(msg: string, fields?: LogFields): void { log('error', msg, fields ?? {}); },
+    info(msg: string, fields?: LogFields): void { void structuredLogger.info(msg, fields); },
+    warn(msg: string, fields?: LogFields): void { void structuredLogger.warn(msg, fields); },
+    error(msg: string, fields?: LogFields): void { void structuredLogger.error(msg, fields); },
   };
 }
 
+/**
+ * @deprecated Use structuredLogger from './structured-logger' instead.
+ */
 export const logger = createLogger();

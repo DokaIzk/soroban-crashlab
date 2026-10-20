@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { GET as getArtifacts } from '../app/api/artifacts/route';
-import { GET as getArtifactDetail } from '../app/api/artifacts/[id]/route';
 import { GET as getRuns } from '../app/api/runs/route';
-import { GET as getRunDetail } from '../app/api/runs/[id]/route';
 
 describe('Caching and Conditional Headers in API Routes', () => {
   it('sets Cache-Control: no-store on GET /api/artifacts', async () => {
-    const res = await getArtifacts(new Request('http://localhost/api/artifacts'));
+    const res = await getArtifacts();
     expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 

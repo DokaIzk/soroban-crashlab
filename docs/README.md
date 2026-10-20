@@ -15,12 +15,22 @@ Soroban CrashLab is an open source dashboard for monitoring and analyzing smart 
 | Read core design decisions | [Architecture Decision Records (ADRs)](adr/README.md) |
 | Learn the dashboard features | [User Guide](USER_GUIDE.md) |
 | Connect external services | [Integrations Guide](INTEGRATIONS.md) |
+| Receive CrashLab webhooks | [Webhook Consumer Cookbook](WEBHOOKS.md) |
 | Deploy to production | [Deployment Guide](DEPLOYMENT.md) |
+| Self-host with TLS, backups and restores | [Reference Deployment](self-hosting/reference-deployment.md) |
+| Respond to an incident | [Incident Response](ops/incident-response.md) |
+| Know exactly what reproduces where | [Reproducibility Contract](reproducibility-contract.md) |
+| Review the security model | [Security docs](security/README.md) |
 | Browse all API endpoints | [API Reference](API.md) |
 | Set environment variables | [Environment Configuration](ENV.md) |
 | Contribute to the project | [Contributing Guide](../CONTRIBUTING.md) |
+| Find your way around the code and the issue batch | [Contributor Architecture Guide](contributors/architecture.md) and [Where to Start](contributors/where-to-start.md) |
+| Cut a release or judge if a change is breaking | [Release Policy](releases/policy.md) and [Checklist](releases/checklist.md) |
+| Back up or restore a deployment | [Backup and Restore](ops/backup-restore.md) |
+| Report a security vulnerability | [Security Policy](../SECURITY.md) · maintainers: [Disclosure Runbook](security/disclosure.md) |
 | See what is planned | [Roadmap](ROADMAP.md) and [Vision](VISION.md) |
 | Troubleshoot issues | [FAQ](FAQ.md) |
+| Inspect a campaign's live health | [Health Snapshot Schema](health-snapshot-schema.md) |
 
 ---
 

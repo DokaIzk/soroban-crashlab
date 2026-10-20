@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRbacPermission } from '../../../../lib/rbac';
 import { checkRequestSize } from '../../../../lib/request-size-limits';
+import { withSizeLimitAndLogging } from '../../../../lib/route-handler';
 import {
   setNotificationPreference,
   getNotificationPreference,
   DigestFrequency,
 } from '../../../../lib/storage/notification-store';
+import type { NotificationEventType } from '../../../../lib/storage/notification-store';
 
 export async function GET(request: NextRequest) {
-  const rbacError = checkRbacPermission(request);
+  const rbacError = await checkRbacPermission(request);
   if (rbacError) return rbacError;
 
   const userId = 'current-user';
@@ -24,8 +26,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ preference });
 }
 
-export async function POST(request: NextRequest) {
-  const rbacError = checkRbacPermission(request);
+async function postHandler(request: NextRequest) {
+  const rbacError = await checkRbacPermission(request);
   if (rbacError) return rbacError;
 
   const sizeError = checkRequestSize(request);
@@ -41,7 +43,7 @@ export async function POST(request: NextRequest) {
 
     const preference = setNotificationPreference(userId, {
       emailDigestFrequency: body.emailDigestFrequency,
-      enabledEventTypes: body.enabledEventTypes as any,
+      enabledEventTypes: body.enabledEventTypes as NotificationEventType[],
     });
 
     return NextResponse.json({ preference }, { status: 201 });
@@ -53,3 +55,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withSizeLimitAndLogging('POST /api/settings/notifications', postHandler);

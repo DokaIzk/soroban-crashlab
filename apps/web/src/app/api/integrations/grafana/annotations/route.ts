@@ -9,8 +9,11 @@
 
 import { successResponse, errorResponse } from '@/lib/api-response-utils';
 import { checkRequestSize } from '@/lib/request-size-limits';
-import type { GrafanaAnnotation } from '../../../../integrate-grafana-dashboard-annotation-api-utils';
-import { buildAnnotationPayload, joinGrafanaUrl } from '../../../../integrate-grafana-dashboard-annotation-api-utils';
+import { withSizeLimitAndLogging } from '@/lib/route-handler';
+import type { GrafanaAnnotation } from '../../../../../features/integrations/integrate-grafana-dashboard-annotation-api-utils';
+import { buildAnnotationPayload, joinGrafanaUrl } from '../../../../../features/integrations/integrate-grafana-dashboard-annotation-api-utils';
+import { httpCall, outboundErrorCode } from '@/lib/http-call';
+import { GRAFANA_FETCH_TIMEOUT_MS } from '@/lib/timeouts';
 
 // Mock data for dev/demo use when Grafana is not yet configured.
 const MOCK_ANNOTATIONS: GrafanaAnnotation[] = [
@@ -46,7 +49,7 @@ export async function GET() {
   return successResponse({ annotations: MOCK_ANNOTATIONS });
 }
 
-export async function POST(request: Request) {
+async function postHandler(request: Request) {
   const sizeError = checkRequestSize(request);
   if (sizeError) {
     return sizeError;
@@ -85,15 +88,21 @@ export async function POST(request: Request) {
     });
 
     try {
-      const grafanaResponse = await fetch(joinGrafanaUrl(baseUrl, '/api/annotations'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiToken}`,
+      // Creating an annotation is not idempotent, so this POST is never
+      // retried — it only gets the bounded timeout.
+      const grafanaResponse = await httpCall(
+        'grafana',
+        joinGrafanaUrl(baseUrl, '/api/annotations'),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiToken}`,
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout?.(10_000),
-      });
+        { attemptTimeoutMs: GRAFANA_FETCH_TIMEOUT_MS },
+      );
 
       if (grafanaResponse.ok) {
         const responseBody = await grafanaResponse.json().catch(() => ({}));
@@ -112,9 +121,12 @@ export async function POST(request: Request) {
       return successResponse({
         success: true,
         warning: 'Annotation queued locally – could not reach Grafana API',
+        code: outboundErrorCode(networkError),
       });
     }
   } catch {
     return errorResponse('Failed to parse request body', 400);
   }
 }
+
+export const POST = withSizeLimitAndLogging('POST /api/integrations/grafana/annotations', postHandler);

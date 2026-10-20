@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkRbacPermission } from './lib/rbac';
+import { enforceRouteAuthorization } from './lib/route-guard';
 
 interface RateLimitBucket {
   count: number;
@@ -38,14 +38,14 @@ export function generateCorrelationId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
-export function proxy(request: NextRequest): NextResponse {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   if (request.method === 'OPTIONS') {
     return NextResponse.next();
   }
 
-  const rbacDenial = checkRbacPermission(request);
-  if (rbacDenial) {
-    return rbacDenial;
+  const guardDenial = await enforceRouteAuthorization(request);
+  if (guardDenial) {
+    return guardDenial;
   }
 
   const now = Date.now();

@@ -1,6 +1,15 @@
 import crypto from 'node:crypto';
 
-export type ApiTokenScope = 'webhook:read' | 'webhook:write' | 'runs:read' | 'runs:write' | 'settings:read' | 'settings:write' | '*';
+export type ApiTokenScope =
+  | 'webhook:read'
+  | 'webhook:write'
+  | 'runs:read'
+  | 'runs:write'
+  | 'settings:read'
+  | 'settings:write'
+  /** CI workflows posting regression results (#1890). */
+  | 'ci:write'
+  | '*';
 
 /** Default lifetime (90 days) applied when no explicit expiry is supplied. */
 export const DEFAULT_TOKEN_TTL_MS =
@@ -222,4 +231,16 @@ export function resolveApiToken(secret: string, nowMs = Date.now()): ResolveToke
 
 export function resetApiTokenStore(): void {
   tokensStore = [];
+}
+
+/**
+ * The stored SHA-256 digest of a token, by id.
+ *
+ * Exists so callers that maintain token-adjacent state (the RBAC principal
+ * index) do not have to re-derive it from a secret they no longer hold. It
+ * returns the same digest that was persisted at creation time, not a new
+ * secret.
+ */
+export function getApiTokenSecretHash(id: string): string | undefined {
+  return tokensStore.find((t) => t.id === id)?.sha256Hash;
 }

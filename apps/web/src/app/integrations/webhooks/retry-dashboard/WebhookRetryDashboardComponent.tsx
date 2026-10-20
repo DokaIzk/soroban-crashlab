@@ -56,16 +56,27 @@ export default function WebhookRetryDashboardComponent() {
     return () => clearTimeout(timeoutId);
   }, [fetchHistory]);
 
-  // Auto-refresh interval if enabled
+  // Advance the durable retry queue (#1635). Retries are never attempted
+  // inside the retry request; this tick runs whatever is due, and a failure
+  // here just leaves the work for the next tick (or the schedules cron).
+  const runRecoveryTick = useCallback(async () => {
+    try {
+      await fetch('/api/webhooks/recovery', { method: 'POST' });
+    } catch {
+      // Best effort — queued retries stay persisted until a tick succeeds.
+    }
+  }, []);
+
+  // Auto-refresh interval if enabled: tick recovery, then reload history.
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
-      fetchHistory();
+      void runRecoveryTick().then(fetchHistory);
     }, 10000);
     return () => clearInterval(interval);
-  }, [autoRefresh, fetchHistory]);
+  }, [autoRefresh, fetchHistory, runRecoveryTick]);
 
-  // Trigger manual retry for a specific item
+  // Queue a manual retry for a specific item, then run a recovery tick
   const handleRetry = async (id: string) => {
     setRetryingId(id);
     try {
@@ -83,6 +94,7 @@ export default function WebhookRetryDashboardComponent() {
             setSelectedPayloadItem(data.data.item);
           }
         }
+        await runRecoveryTick();
       }
       await fetchHistory();
     } catch (err) {
@@ -235,6 +247,11 @@ export default function WebhookRetryDashboardComponent() {
             </div>
           )}
           <span className="text-xs text-zinc-500 dark:text-zinc-400">Requires retry or fix</span>
+          {stats?.parkedCount ? (
+            <span className="block mt-1 text-xs font-semibold text-rose-700 dark:text-rose-300">
+              {stats.parkedCount} parked after repeated drain failures — escalate manually
+            </span>
+          ) : null}
         </div>
 
         <div className="card p-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
@@ -270,7 +287,7 @@ export default function WebhookRetryDashboardComponent() {
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
         {/* Status Filter Pills */}
         <div className="flex items-center gap-1 overflow-x-auto pb-2 sm:pb-0 scrollbar-none">
-          {(['all', 'delivered', 'failed', 'queued'] as DeliveryStatusFilter[]).map((st) => (
+          {(['all', 'delivered', 'failed', 'queued', 'parked'] as DeliveryStatusFilter[]).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -338,6 +355,7 @@ export default function WebhookRetryDashboardComponent() {
                   <th scope="col" className="py-3 px-4">Delivery ID & Event</th>
                   <th scope="col" className="py-3 px-4">Endpoint URL</th>
                   <th scope="col" className="py-3 px-4">HTTP Status</th>
+                  <th scope="col" className="py-3 px-4">Signing Key</th>
                   <th scope="col" className="py-3 px-4">Attempts</th>
                   <th scope="col" className="py-3 px-4">Timestamp</th>
                   <th scope="col" className="py-3 px-4 text-right">Actions</th>
@@ -387,6 +405,20 @@ export default function WebhookRetryDashboardComponent() {
                       >
                         {formatStatusCode(item.statusCode)}
                       </span>
+                    </td>
+
+                    {/* Signing Key */}
+                    <td className="py-3 px-4">
+                      {item.keyId ? (
+                        <span
+                          className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400"
+                          title={`Delivery signed with key ${item.keyId}`}
+                        >
+                          {item.keyId}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>
+                      )}
                     </td>
 
                     {/* Attempts */}

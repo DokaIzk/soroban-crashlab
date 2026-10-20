@@ -8,6 +8,12 @@
 //! validates that specific mitigations are effective and that residual
 //! risks are understood.
 //!
+//! The system-level model is `docs/security/threat-model-v2.md`; its
+//! "Code-side tests → model" table maps each `tN_*` group here to an abuse
+//! case (T-1 → AC-10; T-2/T-3/T-4 → AC-11; T-5/T-6 → AC-15; T-8/T-10 → AC-14;
+//! T-9 → AC-12). `scripts/check-threat-model.mjs` fails CI if a new group is
+//! added here without being mapped there.
+//!
 //! ## Organization
 //!
 //! - **T-1**: Path Traversal Prevention
@@ -150,14 +156,14 @@ mod threat_model_tests {
 
     #[test]
     fn t2_seed_schema_rejects_empty_payload() {
-        let schema = SeedSchema::default();
+        let schema = SeedSchema::strict();
         let empty = CaseSeed {
             id: 1,
             payload: vec![],
         };
 
         let result = empty.validate(&schema);
-        assert!(result.is_err(), "empty payload should fail validation");
+        assert!(result.is_err(), "empty payload should fail validation with strict schema");
         
         let errors = result.unwrap_err();
         assert!(errors.iter().any(|e| matches!(e, SeedValidationError::PayloadTooShort { .. })),
@@ -295,6 +301,10 @@ mod threat_model_tests {
             environment: None,
             failure_payload: vec![],
             rpc_envelope: None,
+            provenance: None,
+            original_seed: None,
+            shrink_lineage: None,
+        engine_version: crate::engine_version::ENGINE_VERSION.to_string(),
         };
 
         let bytes = serde_json::to_vec(&doc).unwrap();
@@ -323,6 +333,10 @@ mod threat_model_tests {
                 environment: None,
                 failure_payload: vec![],
                 rpc_envelope: None,
+                provenance: None,
+                original_seed: None,
+                shrink_lineage: None,
+            engine_version: crate::engine_version::ENGINE_VERSION.to_string(),
             };
 
             let bytes = serde_json::to_vec(&doc).unwrap();
@@ -344,6 +358,10 @@ mod threat_model_tests {
             environment: None,
             failure_payload: vec![],
             rpc_envelope: None,
+            provenance: None,
+            original_seed: None,
+            shrink_lineage: None,
+        engine_version: crate::engine_version::ENGINE_VERSION.to_string(),
         };
 
         let bytes = serde_json::to_vec(&doc).unwrap();
@@ -367,6 +385,10 @@ mod threat_model_tests {
             environment: None,
             failure_payload: vec![],
             rpc_envelope: None,
+            provenance: None,
+            original_seed: None,
+            shrink_lineage: None,
+        engine_version: crate::engine_version::ENGINE_VERSION.to_string(),
         };
 
         let bytes = serde_json::to_vec(&doc).unwrap();
@@ -660,16 +682,24 @@ mod threat_model_tests {
 
     #[test]
     fn t9_rust_fixture_with_malicious_payload() {
-        let malicious_payload = b"}; std::process::Command::new(\"rm\").arg(\"-rf\").arg(\"/\").spawn(); {".to_vec();
-        let bundle = to_bundle(CaseSeed { id: 1, payload: malicious_payload });
+        let malicious_payloads = [
+            b"}; std::process::Command::new(\"rm\").arg(\"-rf\").arg(\"/\").spawn(); {".as_slice(),
+            b"$(touch /tmp/should-not-run); `id`; eval(\"format!(\\\"{}\\\")\")".as_slice(),
+        ];
 
-        let fixture = export_rust_regression_fixture(&bundle, "test_safe").unwrap();
+        for payload in malicious_payloads {
+            let bundle = to_bundle(CaseSeed { id: 1, payload: payload.to_vec() });
+            let fixture = export_rust_regression_fixture(&bundle, "test_safe").unwrap();
 
-        // Malicious code should be hex-encoded, not executable
-        assert!(!fixture.contains("std::process::Command"),
-                "payload should be hex-encoded, not executable");
-        assert!(!fixture.contains("remove_dir"),
-                "no filesystem operations should be generated");
+            assert!(!fixture.contains("std::process::Command"),
+                    "payload should be hex-encoded, not executable");
+            assert!(!fixture.contains("remove_dir"),
+                    "no filesystem operations should be generated");
+            assert!(!fixture.contains("eval("),
+                    "payload must never become evaluated code");
+            assert!(!fixture.contains("$(touch"),
+                    "shell syntax must remain inert data");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -741,6 +771,10 @@ mod threat_model_tests {
                     environment: None,
                     failure_payload: vec![],
                     rpc_envelope: None,
+                    provenance: None,
+                    original_seed: None,
+                    shrink_lineage: None,
+                engine_version: crate::engine_version::ENGINE_VERSION.to_string(),
                 }
             })
             .collect();

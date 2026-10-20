@@ -11,13 +11,8 @@ const eslintConfig = defineConfig([
         argsIgnorePattern: "^_",
         varsIgnorePattern: "^_",
       }],
-      // Ban explicit `any` in lib and utility layers.
-      // Component JSX excluded initially to keep scope shippable.
-      "@typescript-eslint/no-explicit-any": "off",
-      // Architecture guard: artifact-fs behavior lives only under src/lib,
-      // so a divergent same-named utility module cannot reappear (issue
-      // #1606) and be imported by accident. Filesystem uniqueness is
-      // additionally enforced by src/lib/artifact-fs-adapter.audit.test.ts.
+      // Enforce `any` ban globally across all scopes, including component JSX
+      "@typescript-eslint/no-explicit-any": "error",
       "no-restricted-imports": ["error", {
         patterns: [
           {
@@ -26,12 +21,42 @@ const eslintConfig = defineConfig([
           },
         ],
       }],
-    },
-  },
-  {
-    files: ["src/lib/**/*.ts", "src/app/utils/**/*.ts", "src/app/*-utils.ts"],
-    rules: {
-      "@typescript-eslint/no-explicit-any": "error",
+      "no-restricted-properties": ["error",
+        { object: "window", property: "localStorage", message: "Use safeStorage helpers from '@/lib/local-storage'." },
+        { object: "window", property: "sessionStorage", message: "Use safeStorage helpers from '@/lib/local-storage'." },
+        { object: "globalThis", property: "localStorage", message: "Use safeStorage helpers from '@/lib/local-storage'." },
+        { object: "globalThis", property: "sessionStorage", message: "Use safeStorage helpers from '@/lib/local-storage'." },
+      ],
+      "no-restricted-globals": ["error",
+        { name: "localStorage", message: "Use safeStorage helpers from '@/lib/local-storage'." },
+        { name: "sessionStorage", message: "Use safeStorage helpers from '@/lib/local-storage'." },
+      ],
+      "no-restricted-syntax": ["error",
+        {
+          selector: "MemberExpression[object.name='localStorage']",
+          message: "Raw localStorage access is banned; use safeStorage helpers from '@/lib/local-storage'.",
+        },
+        {
+          selector: "MemberExpression[object.object.name='window'][property.name='localStorage']",
+          message: "Raw localStorage access is banned; use safeStorage helpers from '@/lib/local-storage'.",
+        },
+        {
+          selector: "MemberExpression[object.object.name='globalThis'][property.name='localStorage']",
+          message: "Raw localStorage access is banned; use safeStorage helpers from '@/lib/local-storage'.",
+        },
+        {
+          selector: "MemberExpression[object.name='sessionStorage']",
+          message: "Raw sessionStorage access is banned; use safeStorage helpers from '@/lib/local-storage'.",
+        },
+        {
+          selector: "MemberExpression[object.object.name='window'][property.name='sessionStorage']",
+          message: "Raw sessionStorage access is banned; use safeStorage helpers from '@/lib/local-storage'.",
+        },
+        {
+          selector: "MemberExpression[object.object.name='globalThis'][property.name='sessionStorage']",
+          message: "Raw sessionStorage access is banned; use safeStorage helpers from '@/lib/local-storage'.",
+        },
+      ],
     },
   },
   // Allow `any` in test files within the scoped directories
@@ -41,9 +66,21 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-explicit-any": "off",
     },
   },
-  // Override default ignores of eslint-config-next.
+  {
+    files: [
+      "src/lib/local-storage.ts",
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+      "e2e/**",
+      "public/theme-script.js",
+    ],
+    rules: {
+      "no-restricted-globals": "off",
+      "no-restricted-syntax": "off",
+      "no-restricted-properties": "off",
+    },
+  },
   globalIgnores([
-    // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",

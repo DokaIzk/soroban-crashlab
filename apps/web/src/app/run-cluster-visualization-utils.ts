@@ -40,12 +40,17 @@ export interface ClusterMetrics {
 export type ClusterSortKey = "count" | "duration" | "failure-rate";
 
 /**
- * View mode rendered inside the cluster visualization canvas.
+ * View mode rendered inside the legacy cluster visualization canvas. The
+ * current `features/runs/add-run-cluster-visualization` keeps its own local
+ * copy, but the legacy split components in `app/run-cluster-*` still depend on
+ * this shared module exporting the type.
  */
 export type ViewMode = "grid" | "bubbles" | "timeline" | "metrics";
 
 /**
- * Tailwind class groups used to theme a cluster across the visualization.
+ * Tailwind class groups used to theme a cluster across the legacy
+ * visualization surfaces (cards, bubbles, legend, timeline, metrics and
+ * details panels).
  */
 export interface ClusterColorClasses {
   bg: string;
@@ -55,8 +60,7 @@ export interface ClusterColorClasses {
 }
 
 /**
- * Color theme lookup used by every cluster visualization surface (cards,
- * bubbles, legend, timeline, metrics and details panels).
+ * Color theme lookup used by the legacy cluster visualization surfaces.
  */
 export const colorClasses: Record<string, ClusterColorClasses> = {
   blue: {

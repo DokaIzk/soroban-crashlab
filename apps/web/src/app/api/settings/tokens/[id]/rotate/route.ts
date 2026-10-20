@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { successResponse, errorResponse } from '@/lib/api-response-utils';
-import { rotateApiToken } from '../../../../../../lib/storage/api-token-store';
+import { getApiTokenSecretHash, rotateApiToken } from '../../../../../../lib/storage/api-token-store';
+import { registerTokenPrincipal } from '../../../../../../lib/storage/token-principal-store';
+import { AuditLog } from '../../../../../../lib/audit/audit-log';
 
 export async function POST(
   _request: NextRequest,
@@ -15,6 +17,15 @@ export async function POST(
   if (!result) {
     return errorResponse('Token not found.', 404);
   }
+
+  // The successor inherits the principal binding of the token it replaces;
+  // otherwise the rotated secret would authenticate to nobody.
+  const successorHash = getApiTokenSecretHash(result.token.id);
+  if (successorHash) {
+    await registerTokenPrincipal({ tokenId: result.token.id, sha256Hash: successorHash });
+  }
+
+  AuditLog.append({ action: 'token.revoke', target: id, metadata: { rotated_to: result.token.id } });
 
   return successResponse({
     message:

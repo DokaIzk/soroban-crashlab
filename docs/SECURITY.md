@@ -1,48 +1,19 @@
 # Security Policy and Vulnerability Disclosure
 
-For the authoritative reporting instructions, see [`.github/SECURITY.md`](../.github/SECURITY.md).
+For the authoritative reporting instructions, see [`SECURITY.md`](../SECURITY.md).
 
 This document provides developer-facing context: severity classification, safe handling of fuzz artifacts, and the security model contributors are expected to uphold.
 
 ---
 
-## Supported Versions
+## Supported Versions, Reporting and Response Times
 
-Only the latest commit on `main` is actively maintained. There are no versioned releases at this time.
-
-| Branch | Supported |
-|--------|-----------|
-| `main` | ✅ Yes    |
-| older  | ❌ No     |
-
----
-
-## Reporting a Vulnerability
-
-**Do not open a public GitHub issue for security vulnerabilities.**
-
-Use one of the private channels below:
-
-- **GitHub private vulnerability reporting** (preferred): [Security tab → "Report a vulnerability"](../../security/advisories/new)
-- **Email**: Contact details are in [`FUNDING.json`](../FUNDING.json) or the repository profile.
-
-### What to include
-
-- Description of the vulnerability and potential impact
-- Steps to reproduce or a minimal proof-of-concept
-- Affected component (`crashlab-core`, `apps/web`, CI scripts, etc.)
-- Suggested mitigations or patch, if available
-
-### Response timeline
-
-| Step | Target |
-|------|--------|
-| Acknowledgement | 48 hours |
-| Initial triage and severity | 5 business days |
-| Fix or mitigation plan to reporter | 14 days |
-| Public disclosure (coordinated) | 90 days from report |
-
-We follow **coordinated disclosure**. Reporters are credited in the advisory unless they prefer anonymity.
+These are defined once, in the root [`SECURITY.md`](../SECURITY.md) (mirrored
+to [`.github/SECURITY.md`](../.github/SECURITY.md)): private reporting via
+GitHub Security Advisories, acknowledgement within 48 hours, triage within 5
+business days, status updates every 10 business days, and coordinated
+disclosure within 90 days. Maintainers handle reports with the
+[disclosure runbook](security/disclosure.md).
 
 ---
 
@@ -102,7 +73,7 @@ Dependency bumps that fix a CVE are fast-tracked but still require:
 2. CI passing with the new version.
 3. Review by one unconflicted maintainer.
 
-See [CONTRIBUTING.md — Dependency updates](../CONTRIBUTING.md#dependency-updates) for the full checklist.
+See [CONTRIBUTING.md — package.json changes](../CONTRIBUTING.md#packagejson-changes) for the full checklist.
 
 ### Pre-commit secret scanning
 
@@ -134,11 +105,36 @@ See the [Operational Security Assumptions](../MAINTAINER_WAVE_PLAYBOOK.md#operat
 
 ---
 
+## Response Header Hardening
+
+The dashboard (both Vercel and self-hosted Docker deployments) ships the following
+security headers. They are defined in `vercel.json` (root and `apps/web/vercel.json`)
+and in `apps/web/next.config.ts` so both deployment paths behave identically.
+
+`Content-Security-Policy` is the one exception: it is generated per request in
+`apps/web/src/proxy.ts` so it can carry a CSP nonce, and is therefore not in the
+static header lists. See [`docs/CSP.md`](CSP.md).
+
+| Header | Value | Rationale |
+|--------|-------|-----------|
+| `X-Content-Type-Options` | `nosniff` | Prevents browsers from MIME-sniffing responses away from the declared `Content-Type`, reducing drive-by download risks. |
+| `X-Frame-Options` | `SAMEORIGIN` | Legacy clickjacking protection for older clients that do not understand CSP `frame-ancestors`. |
+| `Content-Security-Policy` | `… frame-ancestors 'self' …` | Modern clickjacking defense; `frame-ancestors 'self'` allows embedding only by same-origin pages. |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | Enforces HTTPS for 2 years (63072000 s) across all subdomains and opts into browser preload lists, eliminating SSL-stripping downgrades on repeat visits. |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Sends full URL on same-origin navigations, origin only on cross-origin, and nothing on downgrade (HTTPS→HTTP), preventing run IDs and filter state from leaking to third parties. |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), interest-cohort=()` | Explicitly disables powerful browser features the dashboard never uses, shrinking the attack surface for compromised subresources. |
+| `X-XSS-Protection` | **removed** | Deprecated; ignored by all modern browsers. Its presence misleads security reviewers into thinking XSS protection exists. Rely on CSP instead. |
+
+Headers are snapshot-tested in `apps/web/src/app/security-headers.test.ts` to prevent regressions.
+
+---
+
 ## Related Documents
 
 | Document | Purpose |
 |----------|---------|
 | [`.github/SECURITY.md`](../.github/SECURITY.md) | Authoritative reporting policy and disclosure timelines |
+| [`docs/CSP.md`](CSP.md) | How the Content-Security-Policy is built, and why rendering is forced dynamic |
 | [`docs/THREAT_MODEL_ARTIFACT_HANDLING.md`](THREAT_MODEL_ARTIFACT_HANDLING.md) | STRIDE threat model for artifact ingestion and storage |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Contributor security checklist and PR guidelines |
 | [`MAINTAINER_WAVE_PLAYBOOK.md`](../MAINTAINER_WAVE_PLAYBOOK.md) | Operational security assumptions and known gaps |

@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { StructuredLogger } from './structured-logger';
 
 describe('StructuredLogger', () => {
-  let logEntries: any[] = [];
+  let logEntries: Record<string, unknown>[] = [];
 
-  const mockWriter = vi.fn((entry) => {
+  const mockWriter = vi.fn((entry: Record<string, unknown>) => {
     logEntries.push(entry);
   });
 
@@ -38,7 +38,7 @@ describe('StructuredLogger', () => {
 
   it('includes service name and environment', async () => {
     process.env.SERVICE_NAME = 'test-service';
-    process.env.NODE_ENV = 'test';
+    (process.env as Record<string, string>).NODE_ENV = 'test';
 
     const logger = new StructuredLogger(mockWriter);
     await logger.info('Test');

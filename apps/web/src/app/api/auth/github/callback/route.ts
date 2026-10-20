@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
 import { errorResponse } from '@/lib/api-response-utils';
 import { sanitizeQueryParam, sanitizeSearchParams } from '@/lib/sanitize';
+import {
+  GITHUB_SESSION_COOKIE,
+  getGitHubSessionMaxAgeSeconds,
+  issueGitHubSession,
+} from '@/lib/github-session';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 
 const STATE_COOKIE_NAME = 'github_oauth_state';
 
@@ -53,6 +59,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Resolve the post-auth redirect target from the 'next' query param, validated
+  // against the shared safe-redirect allowlist. Invalid/unknown values fall
+  // back to '/' and are audit-logged by the validator.
+  const nextParam = sanitizedParams.get('next');
+  const safeNext = safeRedirectPath(nextParam ?? null, {
+    context: 'api/auth/github/callback',
+  });
+
   try {
     logger.info('GET /api/auth/github/callback: exchanging code for access token', { code });
 
@@ -68,9 +82,33 @@ export async function GET(request: NextRequest) {
 
     logger.info('GET /api/auth/github/callback: authenticated user', { login: mockUser.login });
 
-    const response = NextResponse.redirect(new URL('/', request.url), {
+    const response = NextResponse.redirect(new URL(safeNext, request.url), {
       status: 302,
     });
+
+    // Bind the session to the authenticated GitHub login so RBAC can resolve a
+    // principal instead of guessing one. Requires a configured signing secret;
+    // without one the flow still completes and the caller stays anonymous,
+    // which resolves to the lowest role.
+    //
+    // Note: the code exchange below is still a stub that yields a fixed user, so
+    // the resulting session names that stub identity. Treat this as wiring for
+    // the real exchange, not as a production identity provider — do not set a
+    // session secret until the exchange talks to GitHub.
+    const session = await issueGitHubSession(mockUser.login);
+    if (session) {
+      response.cookies.set(GITHUB_SESSION_COOKIE, session, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: getGitHubSessionMaxAgeSeconds(),
+        path: '/',
+      });
+    } else {
+      logger.warn(
+        'GET /api/auth/github/callback: no GitHub session secret configured, session not established',
+      );
+    }
 
     return clearCookie(response);
   } catch (error) {
